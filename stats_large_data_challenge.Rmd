@@ -1,0 +1,91 @@
+---
+title: "p-hacking challenge"
+author: "Tiktaalik roseae"
+date: "9/16/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## P-hacking COVID-19
+
+Prompt: 
+To show firsthand how p-hacking and overfitting are possible, we want you to show how these practices can lead to completely inane results.
+
+You can download today's data on the geographic distribution of COVID-19 cases worldwide from the source below. The data is updated daily and contains the lastest publicly available data on COVID-19 by country.The data report the "cumulative number for 14 days of COVID-19 cases per 100k individuals" for each country or territory. There are also several other covariates in the data set. 
+
+The challenge is to build an analysis pipeline that produces a "significant" p-value for a relationship between COVID-19 cases and another variable, where the relationship can't possibly be causal. Prepare an Rmarkdown document with the results. At the end of the document write a paragraph to explain your "findings". Argue for an underlying non-statistical explanation for your group's fake result, and/or critique your statistcal approach and why your group got an apparently significant p-value.
+
+Hint: At certain dates in the pandemic, COVID-19 cases counts had a statistically significant (but not a real causal) relationship with the alphabetic position of the first letter of the country's name.  You might also consider other meaningless aspects of country name (e.g., vowels versus consonants, letters before M versus after). 
+
+## This is our solution
+
+First, we imported the data and loaded packages.
+
+```{r, message=FALSE}
+
+#load necessary packages
+library(utils)
+library(tidyverse)
+library(broom)
+
+#read in data; the dataset will be called "data".
+data <- read.csv("https://opendata.ecdc.europa.eu/covid19/casedistribution/csv", 
+                 na.strings = "", fileEncoding = "UTF-8-BOM")
+head(data)
+```
+Then, we filtered the data table to only have values for the year 2020. Also, we changed the name of the variable "Cumulative_number_for_14_days_of_COVID.19_cases_per_10000" to make it shorter.
+
+```{r, message=FALSE}
+data_2020 <- data %>% filter (year==2020) %>% rename(cumulative_cases=Cumulative_number_for_14_days_of_COVID.19_cases_per_100000)
+```
+
+Then, we created a variable to represent the country name's first letter as a numeric alphabetic position (as shown in the example).
+
+```{r, message=FALSE}
+data_2020$CountryAb <-as.integer(as.factor(substr(data_2020$countriesAndTerritories,1,1)))
+```
+
+Then, we split the tibble into multiple tibbles (saved as a list). We split by month, day and continent. This resulted in 1363 tables, and we fitted a linear regression for most of them (see below).
+
+```{r, message=FALSE}
+data_2020 <- data_2020 %>% group_split(day,month,continentExp)
+
+length(data_2020)
+```
+
+Finally, we fitted multiple linear regressions to evaluate the relationship between "cumulative_cases" (former cumulative number for 14 days of COVID-19 cases per 100k individuals) and the numeric alphabetic position. There is no reason to believe that the numeric alphabetic position should affect COVID incidence! 
+
+To obtain the p values, we built a for loop that fit a linear regression at each position of the list "data_2020". However, this was only  done for tables (i.e. days and continents) that had sufficient data. Specifically, the linear regression was only  fitted if the number of non-NAs in the "cumulative_cases" column was greater than 3.
+
+Inside the loop, we used the function "tidy" to transform the results of the model into a table and then we extracted the p-values into a vector (created empty just before).
+
+```{r, message=FALSE}
+p_values <- c()
+for (i in 1:length(data_2020))
+{
+  if(length(which(!is.na(data_2020[[i]]$cumulative_cases)))>3)
+  {
+    model <- lm(cumulative_cases~CountryAb, data=data_2020[[i]])
+    model_tidy <- tidy(model)[-1,] 
+    p_values[i] <- model_tidy$p.value
+  }
+  else
+    p_values[i] <- NA
+}
+```
+
+And this is what we got! There are some significant relationships. Most of the p-values are high, but six of them are lower than 0.05.
+
+```{r, message=FALSE}
+hist(p_values,col="gray",border="white",breaks=20,
+     main="Distribution of p-values (cumulative_cases~CountryAb, per day and continent) ",cex.main=0.8, xlab="p-values")
+abline(v=0.05)
+
+length(which(p_values<0.05))
+```
+
+Discussion:
+By choosing which specific covariates of a dataset to analyze, you can get subsets of data that contain significant p-values. For example, when we only looked at the "day" & "month" variables in relation to alphabetic ordering of the country's name, we found no significant relationships However, when we looked at the cumulative COVID cases per country considering "day" and the variable "continent", we found 6 instances of significant p-values. Therefore, by manipulating the covariates that you choose to analyze and subset your data by, you can p-hack your way to false significant values. 
